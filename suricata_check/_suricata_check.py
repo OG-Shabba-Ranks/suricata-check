@@ -452,6 +452,10 @@ def __main_single_rule(
     write_output(OutputReport(rules=[rule_report]), out)
 
 
+# ----------------------------------------------------------------------
+# NEW MULTIPROCESSING WORKER FUNCTIONS
+# ----------------------------------------------------------------------
+
 def _worker_init(log_queue: Optional[Any]) -> None:
     """Initializer for multiprocessing pool workers to set up logging."""
     if log_queue is None:
@@ -504,26 +508,16 @@ def _process_rule_task(args: tuple[str, int, Optional[int], bool, Sequence[Check
 
     return rule_report
 
+# ----------------------------------------------------------------------
+# END MULTIPROCESSING WORKER FUNCTIONS
+# ----------------------------------------------------------------------
 
 def process_rules_file(  # noqa: C901, PLR0912, PLR0915
     rules: str,
     evaluate_disabled: bool,
     checkers: Optional[Sequence[CheckerInterface]] = None,
 ) -> OutputReport:
-    """Processes a rule file and returns a list of rules and their issues.
-
-    Args:
-    rules: A path to a Suricata rules file.
-    evaluate_disabled: A flag indicating whether disabled rules should be evaluated.
-    checkers: The checkers to be used when processing the rule file.
-
-    Returns:
-        A list of rules and their issues.
-
-    Raises:
-        RuntimeError: If no checkers could be automatically discovered.
-
-    """
+    """Processes a rule file and returns a list of rules and their issues."""
     if checkers is None:
         checkers = get_checkers()
 
@@ -588,7 +582,6 @@ def process_rules_file(  # noqa: C901, PLR0912, PLR0915
 
     return output
 
-
 def __parse_type_ignore(rule: Optional[Rule]) -> Optional[Sequence[str]]:
     if rule is None:
         return None
@@ -605,21 +598,7 @@ def analyze_rule(
     checkers: Optional[Sequence[CheckerInterface]] = None,
     ignore: Optional[Sequence[str]] = None,
 ) -> RuleReport:
-    """Checks a rule and returns a dictionary containing the rule and a list of issues found.
-
-    Args:
-    rule: The rule to be checked.
-    checkers: The checkers to be used to check the rule.
-    ignore: Regular expressions to match checker codes to ignore
-
-    Returns:
-    A list of issues found in the rule.
-    Each issue is typed as a `dict`.
-
-    Raises:
-    InvalidRuleError: If the rule does not follow the Suricata syntax.
-
-    """
+    """Checks a rule and returns a dictionary containing the rule and a list of issues found."""
     if not is_valid_rule(rule):
         raise InvalidRuleError(rule.raw)
 
