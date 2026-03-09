@@ -420,9 +420,7 @@ def __get_verified_kwarg(
             if kwargs[name] is not CLI_ARGUMENTS[name]["default"]:
                 if not isinstance(kwargs[name], CLI_ARGUMENTS[name]["type"]):
                     raise click.BadParameter(
-                        f"""Error: \
-                Argument `{name}` should have a value of type `{CLI_ARGUMENTS[name]["type"]}` \
-                but has value {kwargs[name]} of type {kwargs[name].__class__} instead.""",
+                        f"""Error: Argument `{name}` should have a value of type `{CLI_ARGUMENTS[name]["type"]}` but has value {kwargs[name]} of type {kwargs[name].__class__} instead.""",
                     )
                 return kwargs[name]
 
@@ -454,12 +452,78 @@ def __main_single_rule(
     write_output(OutputReport(rules=[rule_report]), out)
 
 
+def _worker_init(log_queue: Optional[Any]) -> None:
+    """Initializer for multiprocessing pool workers to set up logging."""
+    if log_queue is None:
+        return
+
+    # Set up the worker's root logger to forward logs to the main process queue
+    root_logger = logging.getLogger()
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+
+    queue_handler = logging.handlers.QueueHandler(log_queue)
+    root_logger.addHandler(queue_handler)
+    # The QueueListener in the main process handles the actual level filtering
+    root_logger.setLevel(logging.DEBUG)
+
+
+def _process_rule_task(args: tuple[str, int, Optional[int], bool, Sequence[CheckerInterface]]) -> Optional[RuleReport]:
+    """Worker function to parse, validate, and analyze a single rule."""
+    rule_line, number, multiline_begin_number, evaluate_disabled, checkers = args
+
+    if rule_line.startswith("#"):
+        if evaluate_disabled:
+            if parse(rule_line) is None:
+                _logger.warning("Ignoring comment on line %i: %s", number, rule_line)
+                return None
+        else:
+            return None
+
+    try:
+        rule: Optional[Rule] = parse(rule_line)
+    except ParsingError:
+        _logger.error("Internal error in parsing of rule on line %i: %s", number, rule_line)
+        rule = None
+
+    ignore = __parse_type_ignore(rule)
+
+    if rule is None:
+        _logger.error("Error parsing rule on line %i: %s", number, rule_line)
+        return None
+
+    if not is_valid_rule(rule):
+        _logger.error("Invalid rule on line %i: %s", number, rule_line)
+        return None
+
+    _logger.debug("Processing rule: %s on line %i", get_rule_option(rule, "sid"), number)
+
+    rule_report: RuleReport = analyze_rule(rule, checkers=checkers, ignore=ignore)
+    rule_report.line_begin = multiline_begin_number or number
+    rule_report.line_end = number
+
+    return rule_report
+
+
 def process_rules_file(  # noqa: C901, PLR0912, PLR0915
     rules: str,
     evaluate_disabled: bool,
     checkers: Optional[Sequence[CheckerInterface]] = None,
 ) -> OutputReport:
-    """Processes a rule file and returns a list of rules and their issues."""
+    """Processes a rule file and returns a list of rules and their issues.
+
+    Args:
+    rules: A path to a Suricata rules file.
+    evaluate_disabled: A flag indicating whether disabled rules should be evaluated.
+    checkers: The checkers to be used when processing the rule file.
+
+    Returns:
+        A list of rules and their issues.
+
+    Raises:
+        RuntimeError: If no checkers could be automatically discovered.
+
+    """
     if checkers is None:
         checkers = get_checkers()
 
@@ -523,6 +587,7 @@ def process_rules_file(  # noqa: C901, PLR0912, PLR0915
     output.summary = summarize_output(output, checkers)
 
     return output
+
 
 def __parse_type_ignore(rule: Optional[Rule]) -> Optional[Sequence[str]]:
     if rule is None:
